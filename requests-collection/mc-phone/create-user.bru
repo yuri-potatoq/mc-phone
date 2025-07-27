@@ -1,0 +1,17 @@
+meta {
+  name: create-user
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{host}}/user/new
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "password": "my@secret!"
+  }
+}

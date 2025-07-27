@@ -1,0 +1,18 @@
+meta {
+  name: logout
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{host}}/logout
+  body: none
+  auth: none
+}
+
+body:json {
+  {
+    "user": "steve",
+    "password": "myfunckin-secret"
+  }
+}

@@ -51,6 +51,7 @@
               rust-toolchain
               rust-analyzer
               openssl
+              sqlx-cli
             ];
           };
         }

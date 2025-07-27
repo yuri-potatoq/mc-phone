@@ -1,8 +1,12 @@
-use std::net::{TcpStream, ToSocketAddrs};
+use tokio::net::{TcpStream, ToSocketAddrs};
+use tokio::sync::Mutex;
 use std::io::prelude::{Read as IORead, Write as IOWrite};
+use std::sync::Arc;
 use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::error::{CrateResult, Error};
 
@@ -78,7 +82,8 @@ impl<'a> RCONPacket<'a> {
         RCONPacket::new(RCONPacketKind::Auth, pass)
     }
 
-    pub fn send(&self, stream: &mut TcpStream) -> CrateResult<()> {
+    pub async fn send(&self, stream: Arc<Mutex<TcpStream>>) -> CrateResult<()> {
+        let mut stream = stream.lock().await;
         let mut packet: Vec<u8> = Vec::new();        
         
         packet.extend(&self.size.to_le_bytes());   // Size (4 bytes)
@@ -93,13 +98,14 @@ impl<'a> RCONPacket<'a> {
         }
         println!();
         
-        stream.write_all(&packet).map_err(Error::connection_error)?;
+        stream.write_all(&packet).await.map_err(Error::connection_error)?;
         Ok(())
     }
     
-    pub fn recv(&self, stream: &mut TcpStream) -> CrateResult<Self> {        
+    pub async fn recv(&self, stream: Arc<Mutex<TcpStream>>) -> CrateResult<Self> {
+        let mut stream = stream.lock().await;   
         let mut buffer = [0; 4096];
-        let readed_n = stream.read(&mut buffer[..]).map_err(Error::connection_error)?;
+        let readed_n = stream.read(&mut buffer[..]).await.map_err(Error::connection_error)?;
         
         println!("Readed {}", readed_n);
         for byte in &buffer[..readed_n] {
@@ -118,10 +124,10 @@ impl<'a> RCONPacket<'a> {
         Ok(readed)
     }   
     
-    pub fn send_sync(&self, stream: &mut TcpStream) -> CrateResult<Self> {
-        self.send(stream)?;
+    pub async fn send_sync(&self, stream: Arc<Mutex<TcpStream>>) -> CrateResult<Self> {        
+        self.send(Arc::clone(&stream)).await?;
         
-        let resp = self.recv(stream)?;
+        let resp = self.recv(Arc::clone(&stream)).await?;
         assert_eq!(resp.id, self.id, "received message with not equal ID: {}", resp);
 
         Ok(resp)
@@ -129,28 +135,34 @@ impl<'a> RCONPacket<'a> {
 }
 
 pub struct RconConnection {
-    stream: TcpStream,
+    stream: Arc<Mutex<TcpStream>>,
 }
 
-impl RconConnection {
+impl RconConnection {    
     /// Returns a authenticated session
-    pub fn connect<A: ToSocketAddrs>(addr: A, pass: &str) -> CrateResult<Self> {
-        let stream = TcpStream::connect(addr).map_err(Error::connection_error)?;
+    pub async fn connect<A: ToSocketAddrs>(addr: A, pass: &str) -> CrateResult<Self> {
+        let mut stream = TcpStream::connect(addr)
+            .await
+            .map_err(Error::connection_error)?;
+                
+        let mut conn = Self { stream: Arc::new(Mutex::new(stream)) };
         
-        let mut conn = Self { stream };
-        
-        conn.rcon_auth(pass)?;
+        conn.rcon_auth(pass).await?;
 
         Ok(conn)
     }
 
-    fn rcon_auth(&mut self, pass: &str) -> CrateResult<()> {
-        RCONPacket::auth_packet(pass).send_sync(&mut self.stream)?;
+    async fn rcon_auth(&self, pass: &str) -> CrateResult<()> {
+        RCONPacket::auth_packet(pass)
+            .send_sync(Arc::clone(&self.stream))
+            .await?;
         Ok(())
     }
     
-    pub fn exec_command(&mut self, cmd: String) -> CrateResult<()> {
-        let resp = RCONPacket::new(RCONPacketKind::ExecCommand, cmd.as_str()).send_sync(&mut self.stream)?;
+    pub async fn exec_command(&self, cmd: String) -> CrateResult<()> {
+        let resp = RCONPacket::new(RCONPacketKind::ExecCommand, cmd.as_str())
+            .send_sync(Arc::clone(&self.stream))
+            .await?;
         println!("{resp}");
         Ok(())
     }
