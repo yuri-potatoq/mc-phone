@@ -38,8 +38,8 @@ impl UserManager {
                 .bind(nick.clone())
                 .bind(p.clone())
                 .execute(Arc::as_ref(&self.pool))
-                    .await
-                    .map_err(Error::cant_create_user)?;
+                .await
+                .map_err(Error::cant_create_user)?;
         }            
         
         Ok(())
@@ -84,8 +84,8 @@ impl UserManager {
             .bind(&nick)
             .bind(&permission)
             .fetch_optional(Arc::as_ref(&self.pool))
-                .await
-                .map_err(Error::cant_create_user)?;           
+            .await
+            .map_err(Error::cant_create_user)?;           
         
         if let Some(_) = result {
             Ok(())
