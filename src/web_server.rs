@@ -19,17 +19,20 @@ use crate::{
 };
 
 use crate::password::{PasswordManager};
+use crate::user::{UserManager};
 
 
 pub async fn run_server<'a>(
     pool: SqlitePool, 
     secret_key: Arc<String>,
-    rcon: RconConnection
+    rcon: RconConnection,
+    user_manager: UserManager,
 ) -> io::Result<()> {
     let session_secret_key = Key::generate();    
     let expiration = Duration::from_secs(24 * 60 * 60);
         
     let rcon_app_data = web::Data::new(rcon);
+    let user_manager_data = web::Data::new(user_manager);
     
     HttpServer::new(move || {
         // keep app_data here to avoid being drop outside
@@ -58,6 +61,7 @@ pub async fn run_server<'a>(
             .wrap(Logger::default())
             .app_data(Data::clone(&pass_manager))
             .app_data(Data::clone(&rcon_app_data))
+            .app_data(Data::clone(&user_manager_data))
             .wrap(identity_mw)
             .wrap(session_mw)            
             .service(index)
@@ -140,4 +144,61 @@ async fn rcon_command(
         .unwrap();
     
     HttpResponse::NoContent()
+}
+
+#[derive(Deserialize, Serialize)]
+struct CreateUserRequest {
+    nick: String,
+    password: String,
+}
+
+#[post("/user/new")]
+async fn create_user(
+    user: Option<Identity>, 
+    command: web::Json<CreateUserRequest>,
+    user_manager: web::Data<UserManager>,
+) -> impl Responder {
+    let _ = user.expect("logged user");
+    
+    match user_manager.new_user(
+        command.nick.clone(), 
+        command.password.clone(),
+    ).await {
+        Ok(_) => {
+            HttpResponse::Created()
+        },
+        Err(err) => {
+            println!("{}", err);
+            HttpResponse::InternalServerError()
+        }
+    }
+}
+
+
+#[derive(Deserialize, Serialize)]
+struct AddUserPermissionsRequest {
+    nick: String,
+    password: String,
+}
+
+#[post("/user/add/permission")]
+async fn add_permission_(
+    user: Option<Identity>, 
+    command: web::Json<CreateUserRequest>,
+    user_manager: web::Data<UserManager>,
+) -> impl Responder {
+    let _ = user.expect("logged user");
+    
+    match user_manager.new_user(
+        command.nick.clone(), 
+        command.password.clone(),
+    ).await {
+        Ok(_) => {
+            HttpResponse::Created()
+        },
+        Err(err) => {
+            println!("{}", err);
+            HttpResponse::InternalServerError()
+        }
+    }
 }

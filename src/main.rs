@@ -1,9 +1,10 @@
-use std::{io::{self}, sync::Arc};
+use std::{io::{self}, sync::{Arc, OnceLock}};
 use clap::{Command, arg};
 
 mod error;
 mod rcon;
 mod password;
+mod user;
 
 use error::*;
 
@@ -12,8 +13,7 @@ use sqlx::SqlitePool;
 use web_server::run_server;
 
 use crate::rcon::RconConnection;
-
-
+use crate::user::UserManager;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -65,14 +65,22 @@ async fn main() -> io::Result<()> {
             
             let pool = SqlitePool::connect("sqlite://mc-phone.db?mode=rwc").await.unwrap();
             
+            sqlx::migrate!("./migrations")
+                .run(&pool)
+                .await
+                .expect("should be migrate before run server");
+            
             let rcon = RconConnection::
                 connect(format!("{}:{}", host, port), password.as_str())
                 .await.unwrap();
             
+            let user_manager = UserManager::new(Arc::new(pool.clone()));
+            
             run_server(
-                pool,
+                pool.clone(),
                 Arc::new(secret_key.clone()),
-                rcon
+                rcon,
+                user_manager,
             ).await.unwrap();
             
             Ok(())

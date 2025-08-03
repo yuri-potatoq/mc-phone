@@ -46,6 +46,7 @@
         rec {
           # `nix develop`
           devShell = pkgs.mkShell {
+	    hardeningDisable = [ "fortify" ];
             nativeBuildInputs = with pkgs; [ pkg-config ];
             buildInputs = with pkgs; [
               rust-toolchain
