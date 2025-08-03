@@ -141,7 +141,8 @@ async fn rcon_command(
     let identity = user.expect("logged user");
     let nick = identity.id().unwrap();
     
-    if let Ok(_) = user_manager.has_permissions(nick.clone(), "admin".to_string()).await {
+    if let Ok(_) = user_manager.has_permissions(nick.clone(), command.command.to_string()).await {
+        //TODO: handle all kinds of commands
         rcon.exec_command(format!("/{} {}", command.command, command.args[0]))
             .await
             .unwrap();
