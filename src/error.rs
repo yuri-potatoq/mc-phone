@@ -15,7 +15,10 @@ pub(crate) enum Error {
     PasswordDontMatch { raw_err: String },
     
     #[snafu(display("can't create use: {}", raw_err))]
-    CantCreateUser { raw_err : String }
+    CantCreateUser { raw_err : String },
+    
+    #[snafu(display("user don't have enough permission: {}", raw_err))]
+    DontHavePermission { raw_err : String }
 }
 
 impl Error {    
@@ -29,6 +32,10 @@ impl Error {
     
     pub(crate) fn cant_create_user<S: ToString>(s: S) -> Self {
         Self::CantCreateUser { raw_err: s.to_string() }
+    }
+    
+    pub(crate) fn dont_have_permission<S: ToString>(s: S) -> Self {
+        Self::DontHavePermission { raw_err: s.to_string() }
     }
 }
 

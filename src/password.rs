@@ -12,6 +12,7 @@ use sqlx::SqlitePool;
 use crate::error::{CrateResult, Error};
 
 
+#[derive(Clone)]
 pub(crate) struct PassHasher {
     hash_algo: Arc<Argon2<'static>>,
 }
@@ -54,6 +55,7 @@ impl PassHasher {
 }
 
 
+#[derive(Clone)]
 pub struct PasswordManager {
     pool: Arc<SqlitePool>,
     hasher: PassHasher,
@@ -65,7 +67,7 @@ impl PasswordManager {
         Self { pool, hasher: PassHasher::new(secret_key) }
     }
     
-    fn hash_password(&self, password: String) -> Result<String, ()> {
+    pub(crate) fn hash_password(&self, password: String) -> Result<String, ()> {
         let password_hash = self.hasher
             .hash_password(password)
             .unwrap()
@@ -85,7 +87,6 @@ impl PasswordManager {
             .await
             .unwrap();
         
-        println!("{}", row.0.clone());
         match self.hasher.verify_password(password, &row.0) {
             Ok(_) => Ok(()),
             Err(_) => {

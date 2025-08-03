@@ -23,8 +23,8 @@ use crate::user::{UserManager};
 
 
 pub async fn run_server<'a>(
-    pool: SqlitePool, 
-    secret_key: Arc<String>,
+    pool: SqlitePool,
+    pass_manager: PasswordManager,
     rcon: RconConnection,
     user_manager: UserManager,
 ) -> io::Result<()> {
@@ -36,9 +36,7 @@ pub async fn run_server<'a>(
     
     HttpServer::new(move || {
         // keep app_data here to avoid being drop outside
-        let pass_manager = web::Data::new(
-            PasswordManager::new(Arc::new(pool.clone()), secret_key.clone())
-        );
+        let pass_manager = web::Data::new(pass_manager.clone());
         
         //TODO: make own impl of session store to save into database.
         let session_store = CookieSessionStore::default();
@@ -63,11 +61,13 @@ pub async fn run_server<'a>(
             .app_data(Data::clone(&rcon_app_data))
             .app_data(Data::clone(&user_manager_data))
             .wrap(identity_mw)
-            .wrap(session_mw)            
+            .wrap(session_mw)
             .service(index)
             .service(login)
             .service(logout)
             .service(rcon_command)
+            .service(create_user)
+            .service(add_permissions)
     })
     .bind(("127.0.0.1", 6969))
     .unwrap()
@@ -136,14 +136,19 @@ async fn rcon_command(
     user: Option<Identity>, 
     rcon: web::Data<RconConnection>,
     command: web::Json<RconCommandRequest>,
+    user_manager: web::Data<UserManager>,
 ) -> impl Responder {
-    let _ = user.expect("logged user");
+    let identity = user.expect("logged user");
+    let nick = identity.id().unwrap();
     
-    rcon.exec_command(format!("/{} {}", command.command, command.args[0]))
-        .await
-        .unwrap();
-    
-    HttpResponse::NoContent()
+    if let Ok(_) = user_manager.has_permissions(nick.clone(), "admin".to_string()).await {
+        rcon.exec_command(format!("/{} {}", command.command, command.args[0]))
+            .await
+            .unwrap();
+        HttpResponse::Ok()
+    } else {
+        HttpResponse::Unauthorized()
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -157,12 +162,14 @@ async fn create_user(
     user: Option<Identity>, 
     command: web::Json<CreateUserRequest>,
     user_manager: web::Data<UserManager>,
+    pass_manager: web::Data<PasswordManager>,
 ) -> impl Responder {
     let _ = user.expect("logged user");
     
+    let user_hash = pass_manager.hash_password(command.password.clone()).unwrap();
     match user_manager.new_user(
         command.nick.clone(), 
-        command.password.clone(),
+        user_hash.clone(),
     ).await {
         Ok(_) => {
             HttpResponse::Created()
@@ -176,29 +183,28 @@ async fn create_user(
 
 
 #[derive(Deserialize, Serialize)]
-struct AddUserPermissionsRequest {
+struct GrantUserPermissionsRequest {
     nick: String,
-    password: String,
+    permissions: Vec<String>,
 }
 
-#[post("/user/add/permission")]
-async fn add_permission_(
+#[post("/user/grant/permission")]
+async fn add_permissions(
     user: Option<Identity>, 
-    command: web::Json<CreateUserRequest>,
+    command: web::Json<GrantUserPermissionsRequest>,
     user_manager: web::Data<UserManager>,
 ) -> impl Responder {
-    let _ = user.expect("logged user");
+    let identity = user.expect("logged user");
     
-    match user_manager.new_user(
-        command.nick.clone(), 
-        command.password.clone(),
-    ).await {
-        Ok(_) => {
-            HttpResponse::Created()
-        },
-        Err(err) => {
-            println!("{}", err);
-            HttpResponse::InternalServerError()
-        }
+    let requirer_nick = identity.id().unwrap();
+    if let Ok(_) = user_manager.has_permissions(requirer_nick.clone(), "admin".to_string()).await {
+        user_manager
+            .add_user_permissions(command.nick.clone(), command.permissions.clone())
+            .await
+            .expect("can't create permission for user");
+        
+        HttpResponse::Ok()
+    } else {
+        HttpResponse::Unauthorized()
     }
 }

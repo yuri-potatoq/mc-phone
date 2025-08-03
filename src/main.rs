@@ -1,4 +1,4 @@
-use std::{io::{self}, sync::{Arc, OnceLock}};
+use std::{io::{self}, sync::{Arc}};
 use clap::{Command, arg};
 
 mod error;
@@ -12,7 +12,7 @@ mod web_server;
 use sqlx::SqlitePool;
 use web_server::run_server;
 
-use crate::rcon::RconConnection;
+use crate::{password::PasswordManager, rcon::RconConnection};
 use crate::user::UserManager;
 
 #[tokio::main]
@@ -45,6 +45,11 @@ async fn main() -> io::Result<()> {
                         .env("SECRET_KEY")
                         .num_args(1)
                 )
+                .arg(
+                    arg!(--root_password <ROOT_PASSWORD>)
+                        .env("ROOT_PASSWORD")
+                        .num_args(1)
+                )
                 .arg_required_else_help(true), 
         );
     
@@ -52,18 +57,23 @@ async fn main() -> io::Result<()> {
         Some(("server", sub_matches)) => {
             let secret_key = sub_matches
                 .get_one::<String>("secret_key")
-                .unwrap();
+                .expect("can't get secret-key");
             let host = sub_matches
                 .get_one::<String>("host")
-                .unwrap();
+                .expect("can't get host");
             let port = sub_matches
                 .get_one::<String>("port")
-                .unwrap();
+                .expect("can't get host");
             let password = sub_matches
                 .get_one::<String>("password")
-                .unwrap();
+                .expect("can't get password");
+            let root_password = sub_matches
+                .get_one::<String>("root_password")
+                .expect("can't get root-password");
             
-            let pool = SqlitePool::connect("sqlite://mc-phone.db?mode=rwc").await.unwrap();
+            let pool = SqlitePool::connect("sqlite://mc-phone.db?mode=rwc").await.unwrap();            
+            let secret_arc = Arc::new(secret_key.clone());
+            let password_manager = PasswordManager::new(Arc::new(pool.clone()), Arc::clone(&secret_arc));
             
             sqlx::migrate!("./migrations")
                 .run(&pool)
@@ -76,9 +86,12 @@ async fn main() -> io::Result<()> {
             
             let user_manager = UserManager::new(Arc::new(pool.clone()));
             
+            let root_hash = password_manager.hash_password(root_password.clone()).expect("hash root password");            
+            user_manager.create_super_user(root_hash.clone()).await.expect("create super user");
+            
             run_server(
                 pool.clone(),
-                Arc::new(secret_key.clone()),
+                password_manager,
                 rcon,
                 user_manager,
             ).await.unwrap();
